@@ -1,0 +1,8 @@
+.deploy/
+.env*
+data/
+certs/
+deploy/
+node_modules/
+.next/
+.git/

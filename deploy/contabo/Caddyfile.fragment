@@ -1,0 +1,5 @@
+
+# OpenReply: certificate endpoint for encrypted Vercel database connections.
+openreply.217-216-79-143.sslip.io {
+    respond "OpenReply infrastructure" 200
+}

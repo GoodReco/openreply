@@ -1,4 +1,8 @@
 {
+  "framework": "nextjs",
+  "buildCommand": "npm run vercel-build",
+  "installCommand": "npm ci",
+  "regions": ["fra1"],
   "crons": [
     {
       "path": "/api/cron/refresh-tokens",

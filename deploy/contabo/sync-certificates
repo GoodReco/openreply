@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+domain=openreply.217-216-79-143.sslip.io
+storage=/var/lib/docker/volumes/baatchit_caddy_data/_data/caddy/certificates
+source_cert=$(find "$storage" -type f -path "*/$domain/$domain.crt" -print -quit)
+test -n "$source_cert"
+source_key="${source_cert%.crt}.key"
+openssl x509 -in "$source_cert" -noout -checkend 86400 >/dev/null
+if cmp -s "$source_cert" "$root/certs/postgres/fullchain.pem" && cmp -s "$source_cert" "$root/certs/redis/fullchain.pem"; then
+    exit 0
+fi
+for service in postgres redis; do
+    install -d -m 755 "$root/certs/$service"
+    install -m 644 "$source_cert" "$root/certs/$service/fullchain.pem"
+    install -m 600 "$source_key" "$root/certs/$service/privkey.pem"
+done
+chown 70:70 "$root/certs/postgres/privkey.pem"
+chown 999:1000 "$root/certs/redis/privkey.pem"
+if "$root/deploy/contabo/compose" ps --status running --services | grep -qx postgres; then
+    "$root/deploy/contabo/compose" exec -T postgres psql -U openreply -d openreply -c 'SELECT pg_reload_conf()' >/dev/null
+fi
+if "$root/deploy/contabo/compose" ps --status running --services | grep -qx redis; then
+    "$root/deploy/contabo/compose" exec -T redis redis-cli CONFIG SET tls-cert-file /certs/fullchain.pem tls-key-file /certs/privkey.pem >/dev/null
+fi

@@ -1,0 +1,7 @@
+[Unit]
+Description=Copy renewed OpenReply TLS certificates into its datastores
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/root/openreply/deploy/contabo/sync-certificates
