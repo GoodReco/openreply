@@ -1,61 +1,59 @@
 import NextAuth, { type NextAuthConfig } from "next-auth";
-import Nodemailer from "next-auth/providers/nodemailer";
-import Resend from "next-auth/providers/resend";
-import { PrismaAdapter } from "@auth/prisma-adapter";
+import Credentials from "next-auth/providers/credentials";
+import { createHash } from "node:crypto";
+import { z } from "zod";
 import { prisma } from "@/lib/db/client";
 import { ensureWorkspaceForUser, getPrimaryWorkspace } from "@/lib/workspace";
 import { isEmailAllowedToSignIn } from "@/lib/env";
-
-type AdapterPrismaClient = Parameters<typeof PrismaAdapter>[0];
-
-const emailFrom = process.env.EMAIL_FROM ?? "OpenReply <login@example.com>";
-// Setting EMAIL_SERVER switches magic links to your own SMTP server, for
-// self-hosters who do not want a third-party mail service. Resend stays the
-// default, so an existing deployment is unaffected.
-const smtpServer = process.env.EMAIL_SERVER;
-
-/**
- * Provider id the login form has to sign in with. It differs per transport,
- * so it is derived here rather than hardcoded at the call site.
- */
-export const EMAIL_PROVIDER_ID = smtpServer ? "nodemailer" : "resend";
+import { verifyPassword } from "@/lib/password";
+import { getRedisConnection } from "@/lib/queue/client";
 
 export const authConfig = {
-  adapter: PrismaAdapter(prisma as unknown as AdapterPrismaClient),
   providers: [
-    smtpServer
-      ? Nodemailer({ server: smtpServer, from: emailFrom })
-      : Resend({
-          apiKey: process.env.RESEND_API_KEY ?? "missing-resend-api-key",
-          from: emailFrom,
-        }),
+    Credentials({
+      credentials: { email: { type: "email" }, password: { type: "password" } },
+      async authorize(credentials) {
+        const parsed = z.object({
+          email: z.string().trim().toLowerCase().email(),
+          password: z.string().min(1).max(256),
+        }).safeParse(credentials);
+        if (!parsed.success || !isEmailAllowedToSignIn(parsed.data.email)) return null;
+        const { email, password } = parsed.data;
+        const hashes = JSON.parse(process.env.LOGIN_PASSWORD_HASHES ?? "{}");
+        if (!Object.hasOwn(hashes, email)) return null;
+        const redis = getRedisConnection();
+        const key = `auth:password:${createHash("sha256").update(email).digest("hex")}`;
+        const attempts = Number(await redis.eval(
+          "local n = redis.call('INCR', KEYS[1]); if n == 1 then redis.call('EXPIRE', KEYS[1], 300) end; return n",
+          1, key,
+        ));
+        if (attempts > 10 || !await verifyPassword(password, hashes[email])) return null;
+        await redis.del(key);
+        const user = await prisma.user.upsert({ where: { email }, update: {}, create: { email } });
+        await ensureWorkspaceForUser(user.id, email);
+        return user;
+      },
+    }),
   ],
   callbacks: {
-    // Runs before the magic link is sent, so a blocked address never receives
-    // one, and again when the link is verified.
     async signIn({ user }) {
       return isEmailAllowedToSignIn(user?.email);
     },
-    async session({ session, user }) {
-      if (session.user) {
-        session.user.id = user.id;
-      }
-      return session;
+    async jwt({ token, user }) {
+      if (user) token.sub = user.id;
+      return isEmailAllowedToSignIn(token.email) ? token : null;
     },
-  },
-  events: {
-    async createUser({ user }) {
-      if (user.id) {
-        await ensureWorkspaceForUser(user.id, user.email);
-      }
+    async session({ session, token }) {
+      if (session.user && token.sub) session.user.id = token.sub;
+      return session;
     },
   },
   pages: {
     signIn: "/login",
-    verifyRequest: "/verify-request",
   },
   session: {
-    strategy: "database",
+    strategy: "jwt",
+    maxAge: 24 * 60 * 60,
   },
   trustHost: true,
   secret: process.env.NEXTAUTH_SECRET,

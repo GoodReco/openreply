@@ -1,4 +1,6 @@
-import { EMAIL_PROVIDER_ID, signIn } from "@/lib/auth";
+import { signIn } from "@/lib/auth";
+import { AuthError } from "next-auth";
+import { redirect } from "next/navigation";
 import { getI18n } from "@/lib/i18n/server";
 import { getCampaignTemplate } from "@/lib/templates/campaign-templates";
 import { DemoNotice } from "@/components/demo-notice";
@@ -19,7 +21,7 @@ export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    checkEmail?: string;
+    error?: string;
     callbackUrl?: string;
     template?: string;
   }>;
@@ -54,19 +56,26 @@ export default async function LoginPage({
   }
 
   const params = await searchParams;
-  const checkEmail = params.checkEmail === "1";
   const selectedTemplate = getCampaignTemplate(params.template);
   const templateCallbackUrl = selectedTemplate
     ? `/campaigns/new?template=${selectedTemplate.slug}`
     : null;
   const callbackUrl = params.callbackUrl ?? templateCallbackUrl ?? "/dashboard";
 
-  async function sendMagicLink(formData: FormData) {
+  async function signInWithPassword(formData: FormData) {
     "use server";
-    await signIn(EMAIL_PROVIDER_ID, {
-      email: String(formData.get("email") ?? ""),
-      redirectTo: callbackUrl,
-    });
+    try {
+      await signIn("credentials", {
+        email: String(formData.get("email") ?? ""),
+        password: String(formData.get("password") ?? ""),
+        redirectTo: callbackUrl,
+      });
+    } catch (error) {
+      if (error instanceof AuthError) {
+        redirect(`/login?${new URLSearchParams({ error: "invalid", callbackUrl })}`);
+      }
+      throw error;
+    }
   }
 
   return (
@@ -79,14 +88,14 @@ export default async function LoginPage({
           <p className="text-muted text-sm leading-relaxed mt-2">
             {selectedTemplate
               ? t("Sign in to use the {name} template.", { name: selectedTemplate.title })
-              : t("Sign in by email, then connect your Instagram professional account.")}
+              : "Sign in with your email and password."}
           </p>
         </div>
 
         <DemoNotice variant="panel" />
 
         <div className="panel rounded p-8 shadow-black/40">
-          {selectedTemplate && !checkEmail && (
+          {selectedTemplate && (
             <div className="mb-5 border border-accent/20 bg-accent/10 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-accent">
                 {t("Template selected")}
@@ -97,15 +106,10 @@ export default async function LoginPage({
             </div>
           )}
 
-          {checkEmail ? (
-            <div className="text-center py-4">
-              <h2 className="text-lg font-semibold mb-2">{t("Check your email")}</h2>
-              <p className="text-sm text-muted">
-                {t("We sent you a secure sign-in link. Open it on this device to continue.")}
-              </p>
-            </div>
-          ) : (
-            <form action={sendMagicLink} className="space-y-5">
+          {params.error && (
+            <p role="alert" className="mb-5 text-sm text-red-400">Invalid email or password. Please try again.</p>
+          )}
+            <form action={signInWithPassword} className="space-y-5">
               <div className="space-y-2">
                 <label
                   htmlFor="email"
@@ -118,20 +122,24 @@ export default async function LoginPage({
                   name="email"
                   type="email"
                   required
-                  autoComplete="email"
+                  autoComplete="username"
                   placeholder="you@company.com"
                   className="w-full px-4 py-3 rounded bg-surface border border-border text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none transition-colors"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="password" className="block text-sm font-medium text-foreground">Password</label>
+                <input id="password" name="password" type="password" required maxLength={256} autoComplete="current-password" className="w-full px-4 py-3 rounded bg-surface border border-border text-sm text-foreground focus:border-accent/40 focus:outline-none transition-colors" />
               </div>
 
               <button
                 type="submit"
                 className="w-full inline-flex items-center justify-center gap-2 rounded bg-accent px-6 py-3.5 text-sm font-semibold text-white shadow-indigo-500/25 transition-all hover:shadow-indigo-500/30"
               >
-                {t("Email me a magic link")}
+                Sign in
               </button>
             </form>
-          )}
         </div>
       </div>
     </div>

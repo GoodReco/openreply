@@ -15,7 +15,8 @@ Secrets are in gitignored, owner-only files. Do not commit or share their conten
 - `.env.infrastructure`: PostgreSQL and Redis passwords.
 - `.env.worker`: worker environment, including private Docker connection URLs.
 - `.env.vercel`: production web environment, including authenticated TLS URLs.
-- `.env.email`: Resend setup key, saved with `python3 deploy/configure-email.py`.
+- `.env.passwords`: salted password hashes for the two approved trial users.
+- `.deploy/trial-logins.txt`: the generated trial credentials. Keep these private.
 - `.deploy/contabo_ed25519`: this Mac's dedicated SSH key; it is not sent to Vercel or the server.
 
 The web app and worker use the same encryption key and datastores. Keep a secure
@@ -61,7 +62,23 @@ connected to the production datastores.
 npx vercel deploy --prod --scope tech-triad2
 ```
 
+## Trial sign-in
+
+The two approved users sign in with their email address and password at
+https://openreply-three-green.vercel.app/login. View the generated credentials on
+your Mac:
+
+```sh
+cat ~/openreply/.deploy/trial-logins.txt
+```
+
+Only configured addresses in `ALLOWED_EMAILS` can sign in. Passwords are stored as
+salted scrypt hashes in the Vercel `LOGIN_PASSWORD_HASHES` setting. Sessions expire
+after 24 hours. Login attempts are limited to ten per address every five minutes.
+No email service or sender-domain verification is required. To reset a trial
+password, replace its salted hash in `LOGIN_PASSWORD_HASHES` and redeploy.
+
 After deploying, check `/api/health`. A complete infrastructure check returns HTTP
-200, `status: "ok"`, and a healthy worker. Email delivery and an Instagram connection
+200, `status: "ok"`, and a healthy worker. An Instagram connection
 must also be configured before campaigns can send messages. Use `docs/setup.md`
 for direct Meta setup, or `docs/zernio.md` for the optional paid provider.
